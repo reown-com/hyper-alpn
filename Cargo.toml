@@ -1,0 +1,25 @@
+[package]
+name = "hyper-alpn"
+version = "0.1.0"
+authors = ["Julius de Bruijn <julius@nauk.io>"]
+license = "MIT"
+readme  = "README.md"
+description = "An ALPN implementation to be used with Hyper 0.12"
+keywords = ["hyper", "alpn", "http2", "h2"]
+repository = "https://github.com/pimeys/hyper-alpn.git"
+homepage = "https://github.com/pimeys/hyper-alpn"
+documentation = "https://docs.rs/hyper-alpn/"
+
+[dependencies]
+rustls = "0.12" 
+tokio-rustls = "0.5"
+webpki = "0.18.0-alpha"
+webpki-roots = "0.14"
+pretty_env_logger = "0.2"
+futures = "0.1"
+tokio = "0.1"
+hyper = "0.12"
+log = "0.4"
+
+[dev-dependencies]
+openssl = "0.10"
