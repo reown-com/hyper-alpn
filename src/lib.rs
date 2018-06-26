@@ -32,10 +32,10 @@ extern crate webpki;
 extern crate webpki_roots;
 extern crate futures;
 extern crate tokio;
+extern crate tokio_dns;
 extern crate pretty_env_logger;
 
 use hyper::client::{
-    HttpConnector,
     connect::{Destination, Connected, Connect},
 };
 
@@ -56,18 +56,17 @@ use tokio_rustls::{
     TlsStream,
 };
 
-use webpki::{DNSName, DNSNameRef};
 use futures::{Future, Poll};
-use tokio::net::TcpStream;
+use tokio::net;
+use webpki::{DNSName, DNSNameRef};
 
 /// Connector for Application-Layer Protocol Negotiation to form a TLS
 /// connection for Hyper.
 pub struct AlpnConnector {
     tls: Arc<ClientConfig>,
-    http: HttpConnector,
 }
 
-type AlpnStream = TlsStream<TcpStream, ClientSession>;
+type AlpnStream = TlsStream<net::TcpStream, ClientSession>;
 
 impl AlpnConnector {
     /// Construct a new `AlpnConnector`.
@@ -143,12 +142,8 @@ impl AlpnConnector {
             .root_store
             .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
 
-        let mut http = HttpConnector::new(4);
-        http.enforce_http(false);
-
         AlpnConnector {
             tls: Arc::new(config),
-            http: http,
         }
     }
 }
@@ -177,10 +172,17 @@ impl Connect for AlpnConnector {
             }
         };
 
+        let server = (dst.host(), dst.port().unwrap_or(443));
         let tls = self.tls.clone();
-        let connecting = self.http
-            .connect(dst)
-            .and_then(move |(tcp, connected)| {
+
+        let connecting = tokio_dns::TcpStream::connect(server)
+            .map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("invalid url: {:?}", e),
+                )
+            })
+            .and_then(move |tcp| {
                 trace!("AlpnConnector::call got TCP, trying TLS");
                 tls.connect_async(host.as_ref(), tcp)
                     .map_err(|e| {
@@ -188,7 +190,7 @@ impl Connect for AlpnConnector {
                         io::Error::new(io::ErrorKind::Other, e)
                     })
                     .map(move |tls| {
-                        (tls, connected)
+                        (tls, Connected::new())
                     })
             })
             .map_err(|e| {
