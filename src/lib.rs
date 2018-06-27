@@ -32,7 +32,7 @@ extern crate webpki;
 extern crate webpki_roots;
 extern crate futures;
 extern crate tokio;
-extern crate tokio_dns;
+extern crate trust_dns_resolver;
 extern crate pretty_env_logger;
 
 use hyper::client::{
@@ -42,6 +42,7 @@ use hyper::client::{
 use std::{
     io,
     fmt,
+    net,
     sync::Arc,
 };
 
@@ -56,8 +57,13 @@ use tokio_rustls::{
     TlsStream,
 };
 
-use futures::{Future, Poll};
-use tokio::net;
+use trust_dns_resolver::{
+    ResolverFuture,
+    config::*,
+};
+
+use futures::{Future, Poll, future::{err, ok}};
+use tokio::net::TcpStream;
 use webpki::{DNSName, DNSNameRef};
 
 /// Connector for Application-Layer Protocol Negotiation to form a TLS
@@ -66,7 +72,7 @@ pub struct AlpnConnector {
     tls: Arc<ClientConfig>,
 }
 
-type AlpnStream = TlsStream<net::TcpStream, ClientSession>;
+type AlpnStream = TlsStream<TcpStream, ClientSession>;
 
 impl AlpnConnector {
     /// Construct a new `AlpnConnector`.
@@ -146,6 +152,40 @@ impl AlpnConnector {
             tls: Arc::new(config),
         }
     }
+
+    fn resolve_and_connect(
+        dst: Destination
+    ) -> impl Future<Item=TcpStream, Error=io::Error> + 'static + Send
+    {
+        let create_resolver = ResolverFuture::new(
+            ResolverConfig::cloudflare(),
+            ResolverOpts::default()
+        );
+
+        let port = dst.port().unwrap_or(443);
+
+        create_resolver
+            .and_then(move |resolver| resolver.lookup_ip(&*format!("{}.", dst.host())))
+            .map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("Couldn't resolve host: {:?}", e)
+                )
+            })
+            .and_then(|response| {
+                match response.iter().next() {
+                    Some(address) => ok(address),
+                    None => err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("Could not resolve host: no address(es) returned")
+                    )),
+                }
+            })
+            .and_then(move |address| {
+                let socket = net::SocketAddr::new(address, port);
+                TcpStream::connect(&socket)
+            })
+    }
 }
 
 impl fmt::Debug for AlpnConnector {
@@ -172,16 +212,8 @@ impl Connect for AlpnConnector {
             }
         };
 
-        let server = (dst.host(), dst.port().unwrap_or(443));
         let tls = self.tls.clone();
-
-        let connecting = tokio_dns::TcpStream::connect(server)
-            .map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("invalid url: {:?}", e),
-                )
-            })
+        let connecting = Self::resolve_and_connect(dst)
             .and_then(move |tcp| {
                 trace!("AlpnConnector::call got TCP, trying TLS");
                 tls.connect_async(host.as_ref(), tcp)
