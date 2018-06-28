@@ -18,7 +18,7 @@ webpki-roots = "0.14"
 pretty_env_logger = "0.2"
 futures = "0.1"
 tokio = "0.1"
-tokio-dns-unofficial = "0.3"
+trust-dns-resolver = "0.9"
 hyper = "0.12"
 log = "0.4"
 
