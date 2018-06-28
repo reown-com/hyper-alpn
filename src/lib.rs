@@ -57,11 +57,7 @@ use tokio_rustls::{
     TlsStream,
 };
 
-use trust_dns_resolver::{
-    ResolverFuture,
-    config::*,
-};
-
+use trust_dns_resolver::ResolverFuture;
 use futures::{Future, Poll, future::{err, ok}};
 use tokio::net::TcpStream;
 use webpki::{DNSName, DNSNameRef};
@@ -153,18 +149,14 @@ impl AlpnConnector {
         }
     }
 
-    fn resolve_and_connect(
+    fn resolve(
         dst: Destination
-    ) -> impl Future<Item=TcpStream, Error=io::Error> + 'static + Send
+    ) -> impl Future<Item=net::SocketAddr, Error=io::Error> + 'static + Send
     {
-        let create_resolver = ResolverFuture::new(
-            ResolverConfig::cloudflare(),
-            ResolverOpts::default()
-        );
-
         let port = dst.port().unwrap_or(443);
 
-        create_resolver
+        ResolverFuture::from_system_conf()
+            .expect("Couldn't create resolver")
             .and_then(move |resolver| resolver.lookup_ip(&*format!("{}.", dst.host())))
             .map_err(|e| {
                 io::Error::new(
@@ -181,9 +173,8 @@ impl AlpnConnector {
                     )),
                 }
             })
-            .and_then(move |address| {
-                let socket = net::SocketAddr::new(address, port);
-                TcpStream::connect(&socket)
+            .map(move |address| {
+                net::SocketAddr::new(address, port)
             })
     }
 }
@@ -213,7 +204,9 @@ impl Connect for AlpnConnector {
         };
 
         let tls = self.tls.clone();
-        let connecting = Self::resolve_and_connect(dst)
+
+        let connecting = Self::resolve(dst)
+            .and_then(move |socket| TcpStream::connect(&socket))
             .and_then(move |tcp| {
                 trace!("AlpnConnector::call got TCP, trying TLS");
                 tls.connect_async(host.as_ref(), tcp)
