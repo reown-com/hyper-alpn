@@ -227,7 +227,7 @@ impl Connect for AlpnConnector {
     }
 }
 
-pub struct AlpnConnecting(Box<Future<Item = (AlpnStream, Connected), Error = io::Error> + Send + 'static>);
+pub struct AlpnConnecting(Box<dyn Future<Item = (AlpnStream, Connected), Error = io::Error> + Send + 'static>);
 
 impl Future for AlpnConnecting {
     type Item = (AlpnStream, Connected);
