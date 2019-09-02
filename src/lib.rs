@@ -33,7 +33,6 @@ extern crate webpki_roots;
 extern crate futures;
 extern crate tokio;
 extern crate trust_dns_resolver;
-extern crate pretty_env_logger;
 
 use hyper::client::{
     connect::{Destination, Connected, Connect},
