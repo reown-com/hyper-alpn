@@ -1,15 +1,10 @@
 //! # hyper-alpn
 //!
-//! An Alpn connector to be used with [hyper](https://hyper.rs) 0.12.
+//! An Alpn connector to be used with [hyper](https://hyper.rs).
 //!
 //! ## Example
 //!
 //! ```no_run
-//! extern crate hyper;
-//! extern crate hyper_alpn;
-//! extern crate futures;
-//! extern crate tokio;
-//!
 //! use futures::{future, Future};
 //! use hyper_alpn::AlpnConnector;
 //! use hyper::Client;
@@ -25,49 +20,34 @@
 #[macro_use]
 extern crate log;
 
-extern crate rustls;
-extern crate tokio_rustls;
-extern crate hyper;
-extern crate webpki;
-extern crate webpki_roots;
-extern crate futures;
-extern crate tokio;
-extern crate trust_dns_resolver;
-
 use hyper::client::{
     connect::{Destination, Connected, Connect},
 };
-
+use futures::future::FutureObj;
 use std::{
     io,
     fmt,
     net,
     sync::Arc,
 };
-
-use rustls::{
-    internal::pemfile,
-    ClientSession,
-    ClientConfig,
-};
-
+use rustls::internal::pemfile;
 use tokio_rustls::{
-    ClientConfigExt,
-    TlsStream,
+    TlsConnector,
+    client::TlsStream,
+    rustls::ClientConfig,
 };
-
-use trust_dns_resolver::ResolverFuture;
-use futures::{Future, Poll, future::{err, ok}};
+use trust_dns_resolver::AsyncResolver;
+use futures::compat::Future01CompatExt;
 use tokio::net::TcpStream;
 use webpki::{DNSName, DNSNameRef};
 
 /// Connector for Application-Layer Protocol Negotiation to form a TLS
 /// connection for Hyper.
 pub struct AlpnConnector {
-    tls: Arc<ClientConfig>,
+    config: Arc<ClientConfig>,
 }
 
-type AlpnStream = TlsStream<TcpStream, ClientSession>;
+type AlpnStream = TlsStream<TcpStream>;
 
 impl AlpnConnector {
     /// Construct a new `AlpnConnector`.
@@ -138,43 +118,51 @@ impl AlpnConnector {
     }
 
     fn with_client_config(mut config: ClientConfig) -> Self {
-        config.alpn_protocols.push("h2".to_owned());
+        config.alpn_protocols.push("h2".as_bytes().to_vec());
         config
             .root_store
             .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
 
         AlpnConnector {
-            tls: Arc::new(config),
+            config: Arc::new(config),
         }
     }
 
-    fn resolve(
-        dst: Destination
-    ) -> impl Future<Item=net::SocketAddr, Error=io::Error> + 'static + Send
-    {
+    async fn resolve(dst: Destination) -> std::io::Result<net::SocketAddr> {
         let port = dst.port().unwrap_or(443);
 
-        ResolverFuture::from_system_conf()
-            .expect("Couldn't create resolver")
-            .and_then(move |resolver| resolver.lookup_ip(&*format!("{}.", dst.host())))
+        let (resolver, driver) = AsyncResolver::from_system_conf().expect("Couldn't create resolver");
+
+        tokio::spawn(async move {
+            driver.compat().await.unwrap();
+        });
+
+        let response = resolver
+            .lookup_ip(&*format!("{}.", dst.host()))
+            .compat()
+            .await
             .map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
                     format!("Couldn't resolve host: {:?}", e)
                 )
-            })
-            .and_then(|response| {
-                match response.iter().next() {
-                    Some(address) => ok(address),
-                    None => err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        format!("Could not resolve host: no address(es) returned")
-                    )),
-                }
-            })
-            .map(move |address| {
-                net::SocketAddr::new(address, port)
-            })
+            });
+
+        let addresses = match response.into_iter().next() {
+            Some(addresses) => addresses,
+            None => return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("Could not resolve host: no address(es) returned")
+            ))
+        };
+
+        match addresses.into_iter().next() {
+            Some(address) => Ok(net::SocketAddr::new(address, port)),
+            None => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("Could not resolve host: no address(es) returned")
+            ))
+        }
     }
 }
 
@@ -187,7 +175,7 @@ impl fmt::Debug for AlpnConnector {
 impl Connect for AlpnConnector {
     type Transport = AlpnStream;
     type Error = io::Error;
-    type Future = AlpnConnecting;
+    type Future = FutureObj<'static, io::Result<(AlpnStream, Connected)>>;
 
     fn connect(&self, dst: Destination) -> Self::Future {
         trace!("AlpnConnector::call ({:?})", dst);
@@ -195,50 +183,32 @@ impl Connect for AlpnConnector {
         let host: DNSName = match DNSNameRef::try_from_ascii_str(dst.host()) {
             Ok(host) => host.into(),
             Err(err) => {
-                return AlpnConnecting(Box::new(::futures::future::err(io::Error::new(
+                return FutureObj::new(Box::new(::futures::future::err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     format!("invalid url: {:?}", err),
                 ))))
             }
         };
 
-        let tls = self.tls.clone();
+        let config = self.config.clone();
 
-        let connecting = Self::resolve(dst)
-            .and_then(move |socket| TcpStream::connect(&socket))
-            .and_then(move |tcp| {
-                trace!("AlpnConnector::call got TCP, trying TLS");
-                tls.connect_async(host.as_ref(), tcp)
-                    .map_err(|e| {
-                        trace!("AlpnConnector::call got error forming a TLS connection.");
-                        io::Error::new(io::ErrorKind::Other, e)
-                    })
-                    .map(move |tls| {
-                        (tls, Connected::new())
-                    })
-            })
-            .map_err(|e| {
-                trace!("AlpnConnector::call got error reading a TLS stream (#{}).", e);
-                io::Error::new(io::ErrorKind::Other, e)
-            });
+        let connecting = async move {
+            let socket = Self::resolve(dst).await?;
+            let tcp = TcpStream::connect(&socket).await?;
 
-        AlpnConnecting(Box::new(connecting))
-    }
-}
+            trace!("AlpnConnector::call got TCP, trying TLS");
 
-pub struct AlpnConnecting(Box<dyn Future<Item = (AlpnStream, Connected), Error = io::Error> + Send + 'static>);
+            let connector = TlsConnector::from(config);
 
-impl Future for AlpnConnecting {
-    type Item = (AlpnStream, Connected);
-    type Error = io::Error;
+            match connector.connect(host.as_ref(), tcp).await {
+                Ok(tls) => Ok((tls, Connected::new())),
+                Err(e) => {
+                    trace!("AlpnConnector::call got error forming a TLS connection.");
+                    Err(io::Error::new(io::ErrorKind::Other, e))
+                }
+            }
+        };
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        self.0.poll()
-    }
-}
-
-impl fmt::Debug for AlpnConnecting {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.pad("AlpnConnecting")
+        FutureObj::new(Box::new(connecting))
     }
 }
