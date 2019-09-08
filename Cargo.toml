@@ -1,10 +1,10 @@
 [package]
 name = "hyper-alpn"
-version = "0.2.0-alpha.1"
+version = "0.2.0-alpha.2"
 authors = ["Julius de Bruijn <julius@nauk.io>"]
 license = "MIT"
 readme  = "README.md"
-description = "An ALPN implementation to be used with Hyper 0.12"
+description = "An ALPN implementation to be used with Hyper"
 keywords = ["hyper", "alpn", "http2", "h2"]
 repository = "https://github.com/pimeys/hyper-alpn.git"
 homepage = "https://github.com/pimeys/hyper-alpn"
