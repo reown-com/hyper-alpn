@@ -1,6 +1,6 @@
 [package]
 name = "hyper-alpn"
-version = "0.2.0-alpha.3"
+version = "0.2.0-alpha.4"
 authors = ["Julius de Bruijn <julius@nauk.io>"]
 license = "MIT"
 readme  = "README.md"
