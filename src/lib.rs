@@ -23,11 +23,13 @@ extern crate log;
 use hyper::client::{
     connect::{Destination, Connected, Connect},
 };
-use futures::future::FutureObj;
 use std::{
     io,
     fmt,
     net,
+    pin::Pin,
+    task::{Poll, Context},
+    future::Future,
     sync::Arc,
 };
 use rustls::internal::pemfile;
@@ -175,7 +177,7 @@ impl fmt::Debug for AlpnConnector {
 impl Connect for AlpnConnector {
     type Transport = AlpnStream;
     type Error = io::Error;
-    type Future = FutureObj<'static, io::Result<(AlpnStream, Connected)>>;
+    type Future = AlpnConnecting;
 
     fn connect(&self, dst: Destination) -> Self::Future {
         trace!("AlpnConnector::call ({:?})", dst);
@@ -183,16 +185,18 @@ impl Connect for AlpnConnector {
         let host: DNSName = match DNSNameRef::try_from_ascii_str(dst.host()) {
             Ok(host) => host.into(),
             Err(err) => {
-                return FutureObj::new(Box::new(::futures::future::err(io::Error::new(
+                let err = io::Error::new(
                     io::ErrorKind::InvalidInput,
                     format!("invalid url: {:?}", err),
-                ))))
+                );
+
+                return AlpnConnecting(Box::pin(async { Err(err) }))
             }
         };
 
         let config = self.config.clone();
 
-        let connecting = async move {
+        let fut = async move {
             let socket = Self::resolve(dst).await?;
             let tcp = TcpStream::connect(&socket).await?;
 
@@ -209,6 +213,24 @@ impl Connect for AlpnConnector {
             }
         };
 
-        FutureObj::new(Box::new(connecting))
+        AlpnConnecting(Box::pin(fut))
+    }
+}
+
+type BoxedFut = Pin<Box<dyn Future<Output = io::Result<(AlpnStream, Connected)>> + Send>>;
+
+pub struct AlpnConnecting(BoxedFut);
+
+impl Future for AlpnConnecting {
+    type Output = Result<(AlpnStream, Connected), io::Error>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.0).poll(cx)
+    }
+}
+
+impl fmt::Debug for AlpnConnecting {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.pad("AlpnConnecting")
     }
 }
