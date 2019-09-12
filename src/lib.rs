@@ -21,14 +21,13 @@
 extern crate log;
 
 use hyper::client::{
-    connect::{Destination, Connected, Connect, dns::{Name, GaiResolver, Resolve}},
+    connect::{Destination, Connected, Connect},
 };
 use std::{
     io,
     fmt,
     net,
     pin::Pin,
-    str::FromStr,
     task::{Poll, Context},
     future::Future,
     sync::Arc,
@@ -39,7 +38,8 @@ use tokio_rustls::{
     client::TlsStream,
     rustls::ClientConfig,
 };
-use tokio::net::TcpStream;
+use tokio_net::tcp::TcpStream;
+use async_std::net::ToSocketAddrs;
 use webpki::{DNSName, DNSNameRef};
 
 /// Connector for Application-Layer Protocol Negotiation to form a TLS
@@ -130,17 +130,7 @@ impl AlpnConnector {
     }
 
     async fn resolve(dst: Destination) -> std::io::Result<net::SocketAddr> {
-        let port = dst.port().unwrap_or(443);
-        let resolver = GaiResolver::new();
-
-        let name = Name::from_str(dst.host()).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("Invalid host: {:?}", e)
-            )
-        })?;
-
-        let addrs = resolver.resolve(name).await.map_err(|e| {
+        let addrs = dst.host().to_socket_addrs().await.map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!("Couldn't resolve host: {:?}", e)
@@ -148,7 +138,10 @@ impl AlpnConnector {
         })?;
 
         match addrs.into_iter().next() {
-            Some(address) => Ok(net::SocketAddr::new(address, port)),
+            Some(mut address) => {
+                address.set_port(dst.port().unwrap_or(443));
+                Ok(address)
+            }
             None => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!("Could not resolve host: no address(es) returned")

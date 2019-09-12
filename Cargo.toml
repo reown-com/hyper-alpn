@@ -13,15 +13,15 @@ edition = "2018"
 
 [dependencies]
 rustls = "0.16"
-tokio-rustls = "0.12.0-alpha.2"
 webpki = "0.21"
 webpki-roots = "0.17"
-futures-preview = { version = "0.3.0-alpha.18", features = ["compat"] }
-tokio = "0.2.0-alpha.4"
-trust-dns-resolver = "0.12"
-hyper = "0.13.0-alpha.1"
 log = "0.4"
-pin-utils = "0.1.0-alpha.4"
+
+futures-preview = { version = "0.3.0-alpha.18" }
+tokio-rustls = "0.12.0-alpha.2"
+tokio-net = "0.2.0-alpha.4"
+hyper = "0.13.0-alpha.1"
+async-std = "0.99.5"
 
 [dev-dependencies]
 openssl = "0.10"
