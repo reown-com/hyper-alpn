@@ -21,13 +21,14 @@
 extern crate log;
 
 use hyper::client::{
-    connect::{Destination, Connected, Connect},
+    connect::{Destination, Connected, Connect, dns::{Name, GaiResolver, Resolve}},
 };
 use std::{
     io,
     fmt,
     net,
     pin::Pin,
+    str::FromStr,
     task::{Poll, Context},
     future::Future,
     sync::Arc,
@@ -38,8 +39,6 @@ use tokio_rustls::{
     client::TlsStream,
     rustls::ClientConfig,
 };
-use trust_dns_resolver::AsyncResolver;
-use futures::compat::Future01CompatExt;
 use tokio::net::TcpStream;
 use webpki::{DNSName, DNSNameRef};
 
@@ -132,33 +131,23 @@ impl AlpnConnector {
 
     async fn resolve(dst: Destination) -> std::io::Result<net::SocketAddr> {
         let port = dst.port().unwrap_or(443);
+        let resolver = GaiResolver::new();
 
-        let (resolver, driver) = AsyncResolver::from_system_conf().expect("Couldn't create resolver");
-
-        tokio::spawn(async move {
-            driver.compat().await.unwrap();
-        });
-
-        let response = resolver
-            .lookup_ip(&*format!("{}.", dst.host()))
-            .compat()
-            .await
-            .map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("Couldn't resolve host: {:?}", e)
-                )
-            });
-
-        let addresses = match response.into_iter().next() {
-            Some(addresses) => addresses,
-            None => return Err(io::Error::new(
+        let name = Name::from_str(dst.host()).map_err(|e| {
+            io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("Could not resolve host: no address(es) returned")
-            ))
-        };
+                format!("Invalid host: {:?}", e)
+            )
+        })?;
 
-        match addresses.into_iter().next() {
+        let addrs = resolver.resolve(name).await.map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("Couldn't resolve host: {:?}", e)
+            )
+        })?;
+
+        match addrs.into_iter().next() {
             Some(address) => Ok(net::SocketAddr::new(address, port)),
             None => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
