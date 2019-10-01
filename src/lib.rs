@@ -130,23 +130,21 @@ impl AlpnConnector {
     }
 
     async fn resolve(dst: Destination) -> std::io::Result<net::SocketAddr> {
-        let addrs = dst.host().to_socket_addrs().await.map_err(|e| {
+        let port = dst.port().unwrap_or(443);
+
+        let mut addrs = (dst.host(), port).to_socket_addrs().await.map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!("Couldn't resolve host: {:?}", e)
             )
         })?;
 
-        match addrs.into_iter().next() {
-            Some(mut address) => {
-                address.set_port(dst.port().unwrap_or(443));
-                Ok(address)
-            }
-            None => Err(io::Error::new(
+        addrs.next().ok_or_else(|| {
+            io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("Could not resolve host: no address(es) returned")
-            ))
-        }
+                "Could not resolve host: no address(es) returned".to_string()
+            )
+        })
     }
 }
 
@@ -214,5 +212,26 @@ impl Future for AlpnConnecting {
 impl fmt::Debug for AlpnConnecting {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.pad("AlpnConnecting")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use hyper::client::connect::Destination;
+    use hyper::Uri;
+    use super::AlpnConnector;
+    use std::net::SocketAddr;
+
+    #[tokio::test]
+    async fn test_resolving() {
+        let uri: Uri = "http://httpbin.com:80".parse().unwrap();
+        let dst = Destination::try_from_uri(uri).unwrap();
+
+        let expected: SocketAddr = "50.63.202.33:80".parse().unwrap();
+
+        assert_eq!(
+            expected,
+            AlpnConnector::resolve(dst).await.unwrap(),
+        )
     }
 }
