@@ -21,6 +21,7 @@
 extern crate log;
 
 use hyper::{service::Service, Uri};
+use hyper::client::connect::{Connected, Connection};
 use std::{
     io,
     fmt,
@@ -36,17 +37,63 @@ use tokio_rustls::{
     client::TlsStream,
     rustls::ClientConfig,
 };
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use async_std::net::ToSocketAddrs;
 use webpki::{DNSName, DNSNameRef};
 
 /// Connector for Application-Layer Protocol Negotiation to form a TLS
 /// connection for Hyper.
+#[derive(Clone)]
 pub struct AlpnConnector {
     config: Arc<ClientConfig>,
 }
 
-type AlpnStream = TlsStream<TcpStream>;
+#[derive(Debug)]
+pub struct AlpnStream(TlsStream<TcpStream>);
+
+impl AsyncRead for AlpnStream {
+    #[inline]
+    unsafe fn prepare_uninitialized_buffer(&self, buf: &mut [std::mem::MaybeUninit<u8>]) -> bool {
+        self.0.prepare_uninitialized_buffer(buf)
+    }
+
+    #[inline]
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context,
+        buf: &mut [u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        Pin::new(&mut Pin::get_mut(self).0).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for AlpnStream {
+    #[inline]
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        Pin::new(&mut Pin::get_mut(self).0).poll_write(cx, buf)
+    }
+
+    #[inline]
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        Pin::new(&mut Pin::get_mut(self).0).poll_flush(cx)
+    }
+
+    #[inline]
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        Pin::new(&mut Pin::get_mut(self).0).poll_shutdown(cx)
+    }
+}
+
+impl Connection for AlpnStream {
+    fn connected(&self) -> Connected {
+        Connected::new()
+    }
+}
 
 impl AlpnConnector {
     /// Construct a new `AlpnConnector`.
@@ -189,7 +236,7 @@ impl Service<Uri> for AlpnConnector {
             let connector = TlsConnector::from(config);
 
             match connector.connect(host.as_ref(), tcp).await {
-                Ok(tls) => Ok(tls),
+                Ok(tls) => Ok(AlpnStream(tls)),
                 Err(e) => {
                     trace!("AlpnConnector::call got error forming a TLS connection.");
                     Err(io::Error::new(io::ErrorKind::Other, e))
@@ -227,8 +274,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolving() {
-        let dst: Uri = "http://httpbin.com:80".parse().unwrap();
-        let expected: SocketAddr = "50.63.202.33:80".parse().unwrap();
+        let dst: Uri = "http://theinstituteforendoticresearch.org:80".parse().unwrap();
+        let expected: SocketAddr = "162.213.255.73:80".parse().unwrap();
 
         assert_eq!(
             expected,
