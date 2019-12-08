@@ -17,12 +17,12 @@ webpki = "0.21"
 webpki-roots = "0.17"
 log = "0.4"
 
-futures-preview = { version = "0.3.0-alpha.19" }
-tokio-rustls = "0.12.0-alpha.5"
-tokio-net = "0.2.0-alpha.6"
-hyper = "0.13.0-alpha.4"
-async-std = "0.99.11"
+futures = "0.3"
+tokio-rustls = "0.12"
+tokio = { version = "0.2", features = ["net"] }
+hyper = { git = "https://github.com/hyperium/hyper" }
+async-std = "1"
 
 [dev-dependencies]
 openssl = "0.10"
-tokio = "0.2.0-alpha.6"
+tokio = { version = "0.2", features = ["macros", "rt-threaded", "net"] }

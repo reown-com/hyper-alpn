@@ -20,9 +20,7 @@
 #[macro_use]
 extern crate log;
 
-use hyper::client::{
-    connect::{Destination, Connected, Connect},
-};
+use hyper::{service::Service, Uri};
 use std::{
     io,
     fmt,
@@ -38,7 +36,7 @@ use tokio_rustls::{
     client::TlsStream,
     rustls::ClientConfig,
 };
-use tokio_net::tcp::TcpStream;
+use tokio::net::TcpStream;
 use async_std::net::ToSocketAddrs;
 use webpki::{DNSName, DNSNameRef};
 
@@ -129,10 +127,11 @@ impl AlpnConnector {
         }
     }
 
-    async fn resolve(dst: Destination) -> std::io::Result<net::SocketAddr> {
-        let port = dst.port().unwrap_or(443);
+    async fn resolve(dst: Uri) -> std::io::Result<net::SocketAddr> {
+        let port = dst.port_u16().unwrap_or(443);
+        let host = dst.host().unwrap_or("localhost");
 
-        let mut addrs = (dst.host(), port).to_socket_addrs().await.map_err(|e| {
+        let mut addrs = (host, port).to_socket_addrs().await.map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!("Couldn't resolve host: {:?}", e)
@@ -154,15 +153,20 @@ impl fmt::Debug for AlpnConnector {
     }
 }
 
-impl Connect for AlpnConnector {
-    type Transport = AlpnStream;
+impl Service<Uri> for AlpnConnector {
+    type Response = AlpnStream;
     type Error = io::Error;
     type Future = AlpnConnecting;
 
-    fn connect(&self, dst: Destination) -> Self::Future {
+    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, dst: Uri) -> Self::Future {
         trace!("AlpnConnector::call ({:?})", dst);
 
-        let host: DNSName = match DNSNameRef::try_from_ascii_str(dst.host()) {
+        let host = dst.host().unwrap_or("localhost");
+        let host: DNSName = match DNSNameRef::try_from_ascii_str(host) {
             Ok(host) => host.into(),
             Err(err) => {
                 let err = io::Error::new(
@@ -185,7 +189,7 @@ impl Connect for AlpnConnector {
             let connector = TlsConnector::from(config);
 
             match connector.connect(host.as_ref(), tcp).await {
-                Ok(tls) => Ok((tls, Connected::new())),
+                Ok(tls) => Ok(tls),
                 Err(e) => {
                     trace!("AlpnConnector::call got error forming a TLS connection.");
                     Err(io::Error::new(io::ErrorKind::Other, e))
@@ -197,12 +201,12 @@ impl Connect for AlpnConnector {
     }
 }
 
-type BoxedFut = Pin<Box<dyn Future<Output = io::Result<(AlpnStream, Connected)>> + Send>>;
+type BoxedFut = Pin<Box<dyn Future<Output = io::Result<AlpnStream>> + Send>>;
 
 pub struct AlpnConnecting(BoxedFut);
 
 impl Future for AlpnConnecting {
-    type Output = Result<(AlpnStream, Connected), io::Error>;
+    type Output = Result<AlpnStream, io::Error>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         Pin::new(&mut self.0).poll(cx)
@@ -217,16 +221,13 @@ impl fmt::Debug for AlpnConnecting {
 
 #[cfg(test)]
 mod tests {
-    use hyper::client::connect::Destination;
     use hyper::Uri;
     use super::AlpnConnector;
     use std::net::SocketAddr;
 
     #[tokio::test]
     async fn test_resolving() {
-        let uri: Uri = "http://httpbin.com:80".parse().unwrap();
-        let dst = Destination::try_from_uri(uri).unwrap();
-
+        let dst: Uri = "http://httpbin.com:80".parse().unwrap();
         let expected: SocketAddr = "50.63.202.33:80".parse().unwrap();
 
         assert_eq!(
