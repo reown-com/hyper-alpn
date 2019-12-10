@@ -9,9 +9,6 @@ Provides an ALPN connector to be used together with
 
 [Documentation](https://docs.rs/hyper-alpn)
 
-## Alpha status
+## Requirements
 
-The current master and alpha versions use `std::future` with async/await syntax,
-and requires a beta compiler of version 1.39.0. 0.1 works with stable, hyper 0.12 and futures 0.1.
-
-Bugfixes for the stable release should go against the `v0.1` branch.
+Needs a Tokio executor version 0.2 or later and Rust compiler version 1.39.0 or later.
