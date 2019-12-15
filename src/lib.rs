@@ -25,7 +25,7 @@ use hyper::client::connect::{Connected, Connection};
 use std::{
     io,
     fmt,
-    net,
+    net::{self, ToSocketAddrs},
     pin::Pin,
     task::{Poll, Context},
     future::Future,
@@ -39,7 +39,6 @@ use tokio_rustls::{
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
-use async_std::net::ToSocketAddrs;
 use webpki::{DNSName, DNSNameRef};
 
 /// Connector for Application-Layer Protocol Negotiation to form a TLS
@@ -176,14 +175,18 @@ impl AlpnConnector {
 
     async fn resolve(dst: Uri) -> std::io::Result<net::SocketAddr> {
         let port = dst.port_u16().unwrap_or(443);
-        let host = dst.host().unwrap_or("localhost");
+        let host = dst.host().unwrap_or("localhost").to_string();
 
-        let mut addrs = (host, port).to_socket_addrs().await.map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("Couldn't resolve host: {:?}", e)
-            )
-        })?;
+        let mut addrs =
+            tokio::task::spawn_blocking(move || (host.as_str(), port).to_socket_addrs())
+                .await
+                .unwrap()
+                .map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("Couldn't resolve host: {:?}", e),
+                    )
+                })?;
 
         addrs.next().ok_or_else(|| {
             io::Error::new(
