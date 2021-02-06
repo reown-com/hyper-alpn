@@ -20,25 +20,21 @@
 #[macro_use]
 extern crate log;
 
-use hyper::{service::Service, Uri};
 use hyper::client::connect::{Connected, Connection};
+use hyper::{service::Service, Uri};
+use rustls::internal::pemfile;
 use std::{
-    io,
     fmt,
+    future::Future,
+    io,
     net::{self, ToSocketAddrs},
     pin::Pin,
-    task::{Poll, Context},
-    future::Future,
     sync::Arc,
+    task::{Context, Poll},
 };
-use rustls::internal::pemfile;
-use tokio_rustls::{
-    TlsConnector,
-    client::TlsStream,
-    rustls::ClientConfig,
-};
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
+use tokio_rustls::{client::TlsStream, rustls::ClientConfig, TlsConnector};
 use webpki::{DNSName, DNSNameRef};
 
 /// Connector for Application-Layer Protocol Negotiation to form a TLS
@@ -53,27 +49,14 @@ pub struct AlpnStream(TlsStream<TcpStream>);
 
 impl AsyncRead for AlpnStream {
     #[inline]
-    unsafe fn prepare_uninitialized_buffer(&self, buf: &mut [std::mem::MaybeUninit<u8>]) -> bool {
-        self.0.prepare_uninitialized_buffer(buf)
-    }
-
-    #[inline]
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context,
-        buf: &mut [u8],
-    ) -> Poll<Result<usize, io::Error>> {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context, buf: &mut ReadBuf) -> Poll<Result<(), io::Error>> {
         Pin::new(&mut Pin::get_mut(self).0).poll_read(cx, buf)
     }
 }
 
 impl AsyncWrite for AlpnStream {
     #[inline]
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<Result<usize, io::Error>> {
+    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize, io::Error>> {
         Pin::new(&mut Pin::get_mut(self).0).poll_write(cx, buf)
     }
 
@@ -137,10 +120,7 @@ impl AlpnConnector {
     ///     let client: Client<AlpnConnector> = builder.build(connector);
     /// }
     /// ```
-    pub fn with_client_cert(
-        cert_pem: &[u8],
-        key_pem: &[u8],
-    ) -> Result<Self, io::Error> {
+    pub fn with_client_cert(cert_pem: &[u8], key_pem: &[u8]) -> Result<Self, io::Error> {
         let parsed_keys = pemfile::pkcs8_private_keys(&mut io::BufReader::new(key_pem)).or({
             trace!("AlpnConnector::with_client_cert error reading private key");
             Err(io::Error::new(io::ErrorKind::InvalidData, "private key"))
@@ -148,12 +128,16 @@ impl AlpnConnector {
 
         if let Some(key) = parsed_keys.first() {
             let mut config = ClientConfig::new();
+
             let parsed_cert = pemfile::certs(&mut io::BufReader::new(cert_pem)).or({
                 trace!("AlpnConnector::with_client_cert error reading certificate");
                 Err(io::Error::new(io::ErrorKind::InvalidData, "certificate"))
             })?;
 
-            config.set_single_client_cert(parsed_cert, key.clone());
+            config.set_single_client_cert(parsed_cert, key.clone()).or_else(|e| {
+                trace!("AlpnConnector::with_client_cert error reading certificate");
+                Err(io::Error::new(io::ErrorKind::InvalidData, format!("{}", e)))
+            })?;
 
             Ok(Self::with_client_config(config))
         } else {
@@ -177,21 +161,15 @@ impl AlpnConnector {
         let port = dst.port_u16().unwrap_or(443);
         let host = dst.host().unwrap_or("localhost").to_string();
 
-        let mut addrs =
-            tokio::task::spawn_blocking(move || (host.as_str(), port).to_socket_addrs())
-                .await
-                .unwrap()
-                .map_err(|e| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        format!("Couldn't resolve host: {:?}", e),
-                    )
-                })?;
+        let mut addrs = tokio::task::spawn_blocking(move || (host.as_str(), port).to_socket_addrs())
+            .await
+            .unwrap()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, format!("Couldn't resolve host: {:?}", e)))?;
 
         addrs.next().ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "Could not resolve host: no address(es) returned".to_string()
+                "Could not resolve host: no address(es) returned".to_string(),
             )
         })
     }
@@ -219,12 +197,9 @@ impl Service<Uri> for AlpnConnector {
         let host: DNSName = match DNSNameRef::try_from_ascii_str(host) {
             Ok(host) => host.into(),
             Err(err) => {
-                let err = io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("invalid url: {:?}", err),
-                );
+                let err = io::Error::new(io::ErrorKind::InvalidInput, format!("invalid url: {:?}", err));
 
-                return AlpnConnecting(Box::pin(async { Err(err) }))
+                return AlpnConnecting(Box::pin(async { Err(err) }));
             }
         };
 
@@ -271,8 +246,8 @@ impl fmt::Debug for AlpnConnecting {
 
 #[cfg(test)]
 mod tests {
-    use hyper::Uri;
     use super::AlpnConnector;
+    use hyper::Uri;
     use std::net::SocketAddr;
 
     #[tokio::test]
@@ -280,9 +255,6 @@ mod tests {
         let dst: Uri = "http://theinstituteforendoticresearch.org:80".parse().unwrap();
         let expected: SocketAddr = "162.213.255.73:80".parse().unwrap();
 
-        assert_eq!(
-            expected,
-            AlpnConnector::resolve(dst).await.unwrap(),
-        )
+        assert_eq!(expected, AlpnConnector::resolve(dst).await.unwrap(),)
     }
 }

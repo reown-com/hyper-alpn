@@ -1,6 +1,6 @@
 [package]
 name = "hyper-alpn"
-version = "0.2.1"
+version = "0.3.0"
 authors = ["Julius de Bruijn <julius@nauk.io>"]
 license = "MIT"
 readme  = "README.md"
@@ -12,16 +12,16 @@ documentation = "https://docs.rs/hyper-alpn/"
 edition = "2018"
 
 [dependencies]
-rustls = "0.16"
+rustls = "0.19"
 webpki = "0.21"
-webpki-roots = "0.17"
+webpki-roots = "0.21"
 log = "0.4"
 
 futures = "0.3"
-tokio-rustls = "0.12"
-tokio = { version = "0.2", features = ["blocking", "net"] }
-hyper = "0.13"
+tokio-rustls = "0.22"
+tokio = { version = "1", features = ["net"] }
+hyper = { version = "0.14", features = ["client"] }
 
 [dev-dependencies]
 openssl = "0.10"
-tokio = { version = "0.2", features = ["macros", "rt-threaded", "net"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
