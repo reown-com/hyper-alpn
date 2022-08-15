@@ -1,6 +1,6 @@
 # hyper-alpn
 
-[![CI Status](https://github.com/walletconnect/hyper-alpn/actions/workflows/ci/badge.svg)](https://github.com/walletconnect/hyper-alpn/actions/workflows/ci)
+[![CI Status](https://github.com/walletconnect/hyper-alpn/actions/workflows/ci.yml/badge.svg)](https://github.com/walletconnect/hyper-alpn/actions/workflows/ci.yml)
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![crates.io](https://img.shields.io/crates/v/hyper-alpn)](https://crates.io/crates/hyper-alpn)
 
