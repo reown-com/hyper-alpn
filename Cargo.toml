@@ -1,13 +1,16 @@
 [package]
 name = "hyper-alpn"
 version = "0.3.0"
-authors = ["Julius de Bruijn <julius@nauk.io>"]
+authors = [
+    "Harry Bairstow <harry@walletconnect.com>",
+    "Julius de Bruijn <julius@nauk.io>"
+]
 license = "MIT"
 readme  = "README.md"
 description = "An ALPN implementation to be used with Hyper 0.12"
 keywords = ["hyper", "alpn", "http2", "h2"]
-repository = "https://github.com/pimeys/hyper-alpn.git"
-homepage = "https://github.com/pimeys/hyper-alpn"
+repository = "https://github.com/walletconnect/hyper-alpn.git"
+homepage = "https://github.com/walletconnect/hyper-alpn"
 documentation = "https://docs.rs/hyper-alpn/"
 edition = "2018"
 
