@@ -1,6 +1,6 @@
 [package]
 name = "hyper-alpn"
-version = "0.3.0"
+version = "0.4.0"
 authors = [
     "Harry Bairstow <harry@walletconnect.com>",
     "Julius de Bruijn <julius@nauk.io>"
@@ -12,18 +12,19 @@ keywords = ["hyper", "alpn", "http2", "h2"]
 repository = "https://github.com/walletconnect/hyper-alpn.git"
 homepage = "https://github.com/walletconnect/hyper-alpn"
 documentation = "https://docs.rs/hyper-alpn/"
-edition = "2018"
+edition = "2021"
 
 [dependencies]
-rustls = "0.19"
-webpki = "0.21"
-webpki-roots = "0.21"
 log = "0.4"
 
-futures = "0.3"
-tokio-rustls = "0.22"
-tokio = { version = "1", features = ["net"] }
-hyper = { version = "0.14", features = ["client"] }
+rustls = "0.20"
+rustls-pemfile = "1.0.1"
+webpki-roots = "0.22"
+
+tokio-rustls = "0.23"
+tokio = { version = "1", features = ["net", "rt"] }
+
+hyper = { version = "0.14", features = ["client", "http2", "h2"] }
 
 [dev-dependencies]
 openssl = "0.10"
