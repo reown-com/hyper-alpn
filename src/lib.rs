@@ -158,27 +158,26 @@ impl AlpnConnector {
     /// }
     /// ```
     pub fn with_client_cert(cert_pem: &[u8], key_pem: &[u8]) -> Result<Self, io::Error> {
-        let parsed_keys = rustls_pemfile::pkcs8_private_keys(&mut io::BufReader::new(key_pem))
-            .or({
-                trace!("AlpnConnector::with_client_cert error reading private key");
-                Err(io::Error::new(io::ErrorKind::InvalidData, "private key"))
-            })?;
-
+        let parsed_keys = rustls_pemfile::pkcs8_private_keys(&mut io::BufReader::new(key_pem)).or({
+            trace!("AlpnConnector::with_client_cert error reading private key");
+            Err(io::Error::new(io::ErrorKind::InvalidData, "private key"))
+        })?;
 
         if let Some(key) = parsed_keys.first() {
-            let parsed_cert = rustls_pemfile::certs(&mut io::BufReader::new(cert_pem)).or({
-                trace!("AlpnConnector::with_client_cert error reading private key");
-                Err(io::Error::new(io::ErrorKind::InvalidData, "private key"))
-            })?.into_iter()
+            let parsed_cert = rustls_pemfile::certs(&mut io::BufReader::new(cert_pem))
+                .or({
+                    trace!("AlpnConnector::with_client_cert error reading private key");
+                    Err(io::Error::new(io::ErrorKind::InvalidData, "private key"))
+                })?
+                .into_iter()
                 .map(|key| rustls::Certificate(key))
                 .collect::<Vec<rustls::Certificate>>();
 
             let mut c = Self::with_client_config(ClientConfig::builder());
-            c.build_config_with_certificate(parsed_cert, key.clone())
-                .or({
-                    trace!("AlpnConnector::build_config_with_certificate invalid key");
-                    Err(io::Error::new(io::ErrorKind::InvalidData, "key"))
-                })?;
+            c.build_config_with_certificate(parsed_cert, key.clone()).or({
+                trace!("AlpnConnector::build_config_with_certificate invalid key");
+                Err(io::Error::new(io::ErrorKind::InvalidData, "key"))
+            })?;
 
             Ok(c)
         } else {
@@ -261,7 +260,6 @@ impl Service<Uri> for AlpnConnector {
             let tcp = TcpStream::connect(&socket).await?;
 
             trace!("AlpnConnector::call got TCP, trying TLS");
-
 
             let connector = TlsConnector::from(config);
 
