@@ -22,7 +22,9 @@ extern crate log;
 
 use hyper::client::connect::{Connected, Connection};
 use hyper::{service::Service, Uri};
-use rustls::internal::pemfile;
+use rustls::client::WantsTransparencyPolicyOrClientCert;
+use rustls::{self, ConfigBuilder, OwnedTrustAnchor, ServerName, WantsCipherSuites};
+use std::convert::TryFrom;
 use std::{
     fmt,
     future::Future,
@@ -35,13 +37,50 @@ use std::{
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 use tokio_rustls::{client::TlsStream, rustls::ClientConfig, TlsConnector};
-use webpki::{DNSName, DNSNameRef};
+use webpki_roots;
 
 /// Connector for Application-Layer Protocol Negotiation to form a TLS
 /// connection for Hyper.
 #[derive(Clone)]
 pub struct AlpnConnector {
-    config: Arc<ClientConfig>,
+    config: Option<Arc<ClientConfig>>,
+    config_builder: ConfigBuilder<ClientConfig, WantsTransparencyPolicyOrClientCert>,
+}
+
+impl AlpnConnector {
+    /// Builds the `config_builder` and places it in `config` provided that `config` is `None`
+    fn build_config(&mut self) {
+        if self.config.is_some() {
+            return;
+        }
+
+        let mut config = self.config_builder.with_no_client_auth();
+        config.alpn_protocols.push("h2".as_bytes().to_vec());
+        self.config = Some(Arc::new(config));
+    }
+
+    /// Builds the `config_builder` with a certificate and places it in `config` provided that `config` is `None`
+    fn build_config_with_certificate(
+        &mut self,
+        cert_chain: Vec<rustls::Certificate>,
+        key_der: Vec<u8>,
+    ) -> Result<(), rustls::Error> {
+        if self.config.is_some() {
+            return Ok(());
+        }
+
+        let config = self
+            .config_builder
+            .with_single_cert(cert_chain, rustls::PrivateKey(key_der));
+        match config {
+            Ok(mut c) => {
+                c.alpn_protocols.push("h2".as_bytes().to_vec());
+                self.config = Some(Arc::new(c));
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -80,7 +119,7 @@ impl Connection for AlpnStream {
 impl AlpnConnector {
     /// Construct a new `AlpnConnector`.
     pub fn new() -> Self {
-        Self::with_client_config(ClientConfig::new())
+        Self::with_client_config(ClientConfig::builder())
     }
 
     /// Construct a new `AlpnConnector` with a custom certificate and private
@@ -90,10 +129,8 @@ impl AlpnConnector {
     /// extern crate openssl;
     /// extern crate hyper;
     /// extern crate hyper_alpn;
-    /// extern crate futures;
     /// extern crate tokio;
     ///
-    /// use futures::{future, Future};
     /// use hyper_alpn::AlpnConnector;
     /// use hyper::Client;
     /// use openssl::pkcs12::Pkcs12;
@@ -121,39 +158,39 @@ impl AlpnConnector {
     /// }
     /// ```
     pub fn with_client_cert(cert_pem: &[u8], key_pem: &[u8]) -> Result<Self, io::Error> {
-        let parsed_keys = pemfile::pkcs8_private_keys(&mut io::BufReader::new(key_pem)).or({
-            trace!("AlpnConnector::with_client_cert error reading private key");
-            Err(io::Error::new(io::ErrorKind::InvalidData, "private key"))
-        })?;
+        let parsed_keys = rustls_pemfile::pkcs8_private_keys(&mut io::BufReader::new(key_pem))
+            .or({
+                trace!("AlpnConnector::with_client_cert error reading private key");
+                Err(io::Error::new(io::ErrorKind::InvalidData, "private key"))
+            })?
+            .into_iter()
+            .map(|key| rustls::Certificate(key))
+            .collect::<Vec<rustls::Certificate>>();
 
-        if let Some(key) = parsed_keys.first() {
-            let mut config = ClientConfig::new();
-
-            let parsed_cert = pemfile::certs(&mut io::BufReader::new(cert_pem)).or({
-                trace!("AlpnConnector::with_client_cert error reading certificate");
-                Err(io::Error::new(io::ErrorKind::InvalidData, "certificate"))
+        let mut c = Self::with_client_config(ClientConfig::builder());
+        c.build_config_with_certificate(parsed_keys, key_pem.clone().to_vec())
+            .or({
+                trace!("AlpnConnector::build_config_with_certificate invalid key");
+                Err(io::Error::new(io::ErrorKind::InvalidData, "key"))
             })?;
 
-            config.set_single_client_cert(parsed_cert, key.clone()).or_else(|e| {
-                trace!("AlpnConnector::with_client_cert error reading certificate");
-                Err(io::Error::new(io::ErrorKind::InvalidData, format!("{}", e)))
-            })?;
-
-            Ok(Self::with_client_config(config))
-        } else {
-            trace!("AlpnConnector::with_client_cert no private keys found from the given PEM");
-            Err(io::Error::new(io::ErrorKind::InvalidData, "private key"))
-        }
+        Ok(c)
     }
 
-    fn with_client_config(mut config: ClientConfig) -> Self {
-        config.alpn_protocols.push("h2".as_bytes().to_vec());
-        config
-            .root_store
-            .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
+    fn with_client_config(config: ConfigBuilder<ClientConfig, WantsCipherSuites>) -> Self {
+        let mut root_cert_store = rustls::RootCertStore::empty();
+
+        root_cert_store.add_server_trust_anchors(
+            webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
+                OwnedTrustAnchor::from_subject_spki_name_constraints(ta.subject, ta.spki, ta.name_constraints)
+            }),
+        );
+
+        let config = config.with_safe_defaults().with_root_certificates(root_cert_store);
 
         AlpnConnector {
-            config: Arc::new(config),
+            config: None,
+            config_builder: config,
         }
     }
 
@@ -194,8 +231,8 @@ impl Service<Uri> for AlpnConnector {
         trace!("AlpnConnector::call ({:?})", dst);
 
         let host = dst.host().unwrap_or("localhost");
-        let host: DNSName = match DNSNameRef::try_from_ascii_str(host) {
-            Ok(host) => host.into(),
+        let host = match ServerName::try_from(host) {
+            Ok(host) => host,
             Err(err) => {
                 let err = io::Error::new(io::ErrorKind::InvalidInput, format!("invalid url: {:?}", err));
 
@@ -204,6 +241,10 @@ impl Service<Uri> for AlpnConnector {
         };
 
         let config = self.config.clone();
+        if config.is_none() {
+            self.build_config()
+        }
+        let config = config.unwrap();
 
         let fut = async move {
             let socket = Self::resolve(dst).await?;
@@ -211,9 +252,10 @@ impl Service<Uri> for AlpnConnector {
 
             trace!("AlpnConnector::call got TCP, trying TLS");
 
+
             let connector = TlsConnector::from(config);
 
-            match connector.connect(host.as_ref(), tcp).await {
+            match connector.connect(host, tcp).await {
                 Ok(tls) => Ok(AlpnStream(tls)),
                 Err(e) => {
                     trace!("AlpnConnector::call got error forming a TLS connection.");
