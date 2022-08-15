@@ -11,4 +11,4 @@ Provides an ALPN connector to be used together with
 
 ## Requirements
 
-Needs a Tokio executor version 0.2 or later and Rust compiler version 1.39.0 or later.
+Needs a Tokio executor version 1 or later and Rust compiler version 1.56.0 or later.
