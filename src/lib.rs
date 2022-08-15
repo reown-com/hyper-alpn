@@ -5,7 +5,6 @@
 //! ## Example
 //!
 //! ```no_run
-//! use futures::{future, Future};
 //! use hyper_alpn::AlpnConnector;
 //! use hyper::Client;
 //!
@@ -54,7 +53,7 @@ impl AlpnConnector {
             return;
         }
 
-        let mut config = self.config_builder.with_no_client_auth();
+        let mut config = self.config_builder.clone().with_no_client_auth();
         config.alpn_protocols.push("h2".as_bytes().to_vec());
         self.config = Some(Arc::new(config));
     }
@@ -71,6 +70,7 @@ impl AlpnConnector {
 
         let config = self
             .config_builder
+            .clone()
             .with_single_cert(cert_chain, rustls::PrivateKey(key_der));
         match config {
             Ok(mut c) => {
@@ -162,19 +162,29 @@ impl AlpnConnector {
             .or({
                 trace!("AlpnConnector::with_client_cert error reading private key");
                 Err(io::Error::new(io::ErrorKind::InvalidData, "private key"))
-            })?
-            .into_iter()
-            .map(|key| rustls::Certificate(key))
-            .collect::<Vec<rustls::Certificate>>();
-
-        let mut c = Self::with_client_config(ClientConfig::builder());
-        c.build_config_with_certificate(parsed_keys, key_pem.clone().to_vec())
-            .or({
-                trace!("AlpnConnector::build_config_with_certificate invalid key");
-                Err(io::Error::new(io::ErrorKind::InvalidData, "key"))
             })?;
 
-        Ok(c)
+
+        if let Some(key) = parsed_keys.first() {
+            let parsed_cert = rustls_pemfile::certs(&mut io::BufReader::new(cert_pem)).or({
+                trace!("AlpnConnector::with_client_cert error reading private key");
+                Err(io::Error::new(io::ErrorKind::InvalidData, "private key"))
+            })?.into_iter()
+                .map(|key| rustls::Certificate(key))
+                .collect::<Vec<rustls::Certificate>>();
+
+            let mut c = Self::with_client_config(ClientConfig::builder());
+            c.build_config_with_certificate(parsed_cert, key.clone())
+                .or({
+                    trace!("AlpnConnector::build_config_with_certificate invalid key");
+                    Err(io::Error::new(io::ErrorKind::InvalidData, "key"))
+                })?;
+
+            Ok(c)
+        } else {
+            trace!("AlpnConnector::with_client_cert no private keys found from the given PEM");
+            Err(io::Error::new(io::ErrorKind::InvalidData, "private key"))
+        }
     }
 
     fn with_client_config(config: ConfigBuilder<ClientConfig, WantsCipherSuites>) -> Self {

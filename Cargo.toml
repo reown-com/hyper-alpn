@@ -24,7 +24,7 @@ webpki-roots = "0.22"
 tokio-rustls = "0.23"
 tokio = { version = "1", features = ["net"] }
 
-hyper = { version = "0.14", features = ["client"] }
+hyper = { version = "0.14", features = ["client", "http2", "h2"] }
 
 [dev-dependencies]
 openssl = "0.10"
