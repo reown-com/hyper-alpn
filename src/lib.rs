@@ -16,6 +16,8 @@
 //! }
 //! ```
 
+#![allow(clippy::needless_doctest_main)]
+
 #[macro_use]
 extern crate log;
 
@@ -36,7 +38,6 @@ use std::{
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 use tokio_rustls::{client::TlsStream, rustls::ClientConfig, TlsConnector};
-use webpki_roots;
 
 /// Connector for Application-Layer Protocol Negotiation to form a TLS
 /// connection for Hyper.
@@ -80,6 +81,12 @@ impl AlpnConnector {
             }
             Err(e) => Err(e),
         }
+    }
+}
+
+impl Default for AlpnConnector {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -170,7 +177,7 @@ impl AlpnConnector {
                     Err(io::Error::new(io::ErrorKind::InvalidData, "private key"))
                 })?
                 .into_iter()
-                .map(|key| rustls::Certificate(key))
+                .map(rustls::Certificate)
                 .collect::<Vec<rustls::Certificate>>();
 
             let mut c = Self::with_client_config(ClientConfig::builder());
