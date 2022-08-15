@@ -1,6 +1,6 @@
 # hyper-alpn
 
-[![Travis Build Status](https://travis-ci.org/pimeys/hyper-alpn.svg?branch=master)](https://travis-ci.org/pimeys/hyper-alpn)
+[![CI Status](https://github.com/walletconnect/hyper-alpn/actions/workflows/ci/badge.svg)](https://github.com/walletconnect/hyper-alpn/actions/workflows/ci)
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![crates.io](https://img.shields.io/crates/v/hyper-alpn)](https://crates.io/crates/hyper-alpn)
 
