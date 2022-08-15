@@ -48,7 +48,7 @@ pub struct AlpnConnector {
 }
 
 impl AlpnConnector {
-    /// Builds the `config_builder` and places it in `config` provided that `config` is `None`
+    /// Builds the `config_builder` and places it in `config` provided that `config` is `None`.
     fn build_config(&mut self) {
         if self.config.is_some() {
             return;
@@ -59,7 +59,7 @@ impl AlpnConnector {
         self.config = Some(Arc::new(config));
     }
 
-    /// Builds the `config_builder` with a certificate and places it in `config` provided that `config` is `None`
+    /// Builds the `config_builder` with a certificate and places it in `config` provided that `config` is `None`.
     fn build_config_with_certificate(
         &mut self,
         cert_chain: Vec<rustls::Certificate>,
