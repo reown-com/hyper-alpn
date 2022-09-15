@@ -48,15 +48,19 @@ pub struct AlpnConnector {
 }
 
 impl AlpnConnector {
-    /// Builds the `config_builder` and places it in `config` provided that `config` is `None`.
-    fn build_config(&mut self) {
-        if self.config.is_some() {
-            return;
+    /// Builds the `config_builder`, places it in `config` provided that `config` is `None`
+    /// and returns the built config.
+    fn build_config(&mut self) -> Arc<ClientConfig> {
+        match &self.config {
+            Some(c) => c.clone(),
+            None => {
+                let mut config = self.config_builder.clone().with_no_client_auth();
+                config.alpn_protocols.push("h2".as_bytes().to_vec());
+                let wrapped_config = Arc::new(config);
+                self.config = Some(wrapped_config.clone());
+                wrapped_config
+            }
         }
-
-        let mut config = self.config_builder.clone().with_no_client_auth();
-        config.alpn_protocols.push("h2".as_bytes().to_vec());
-        self.config = Some(Arc::new(config));
     }
 
     /// Builds the `config_builder` with a certificate and places it in `config` provided that `config` is `None`.
@@ -256,11 +260,7 @@ impl Service<Uri> for AlpnConnector {
             }
         };
 
-        let config = self.config.clone();
-        if config.is_none() {
-            self.build_config()
-        }
-        let config = config.unwrap();
+        let config = self.build_config();
 
         let fut = async move {
             let socket = Self::resolve(dst).await?;
