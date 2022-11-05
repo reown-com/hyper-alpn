@@ -256,11 +256,12 @@ impl Service<Uri> for AlpnConnector {
             }
         };
 
-        let config = self.config.clone();
-        if config.is_none() {
-            self.build_config()
-        }
-        let config = config.unwrap();
+        let config = if let Some(config) = self.config.as_ref() {
+            config.clone()
+        } else {
+            self.build_config();
+            self.config.clone().unwrap()
+        };
 
         let fut = async move {
             let socket = Self::resolve(dst).await?;
