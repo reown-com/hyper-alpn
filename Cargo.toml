@@ -17,11 +17,11 @@ edition = "2021"
 [dependencies]
 log = "0.4"
 
-rustls = "0.20"
-rustls-pemfile = "1.0.1"
-webpki-roots = "0.22"
+rustls = "0.21"
+rustls-pemfile = "1.0.3"
+webpki-roots = "0.25"
 
-tokio-rustls = "0.23"
+tokio-rustls = "0.24"
 tokio = { version = "1", features = ["net", "rt"] }
 
 hyper = { version = "0.14", features = ["client", "http2", "h2"] }
