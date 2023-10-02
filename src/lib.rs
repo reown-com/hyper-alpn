@@ -72,7 +72,7 @@ impl AlpnConnector {
         let config = self
             .config_builder
             .clone()
-            .with_single_cert(cert_chain, rustls::PrivateKey(key_der));
+            .with_client_auth_cert(cert_chain, rustls::PrivateKey(key_der));
         match config {
             Ok(mut c) => {
                 c.alpn_protocols.push("h2".as_bytes().to_vec());
@@ -196,8 +196,8 @@ impl AlpnConnector {
     fn with_client_config(config: ConfigBuilder<ClientConfig, WantsCipherSuites>) -> Self {
         let mut root_cert_store = rustls::RootCertStore::empty();
 
-        root_cert_store.add_server_trust_anchors(
-            webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
+        root_cert_store.add_trust_anchors(
+            webpki_roots::TLS_SERVER_ROOTS.iter().map(|ta| {
                 OwnedTrustAnchor::from_subject_spki_name_constraints(ta.subject, ta.spki, ta.name_constraints)
             }),
         );
